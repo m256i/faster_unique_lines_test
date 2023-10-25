@@ -90,6 +90,8 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
   highwayhash::HHResult64 result;
 
   HH_ALIGNAS(32) const highwayhash::HHKey key = {1, 1, 1, 1};
+  highwayhash::HHStateT<HH_TARGET_AVX2> state(key);
+
   std::vector<uptr> hashmap(mapsize);
   u64 current_index = 0, next_index = 0;
 
@@ -99,16 +101,15 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 
   auto t1 = high_resolution_clock::now();
 
-  while (current_index < fsize) [[likely]]
+  while (current_index != fsize) [[likely]]
   {
     next_index = current_index + fast_getline((const char *)((uptr)ipt_buf.data() + current_index));
 
-    highwayhash::HHStateT<HH_TARGET_AVX2> state(key);
     highwayhash::HighwayHashT(&state, ipt_buf.data() + current_index, next_index - current_index,
                               &result);
 
     auto hashvalue = result % mapsize;
-    while (true) [[unlikely]]
+    while (true)
     {
       _mm_prefetch((char *)&hashmap[hashvalue], _MM_HINT_T1);
       // biggest bottleneck here cold memory
