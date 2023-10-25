@@ -67,9 +67,9 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 
 #ifdef _WIN32
 
-  auto fsize = xenon_file::get_fsize(TEXT("D:/git/faster_unique/invalid_tokens.txt"));
+  auto fsize = xenon_file::get_fsize(argv[1]);
   ipt_buf.reserve(fsize);
-  xenon_file::read_file(TEXT("D:/git/faster_unique/invalid_tokens.txt"), ipt_buf);
+  xenon_file::read_file(argv[1], ipt_buf);
 
 #else
 
