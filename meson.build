@@ -18,14 +18,13 @@ endforeach
 cmake             = import('cmake')
 
 root_path = meson.global_source_root()
-include_path = root_path / 'include'
 hh_path = root_path / 'highwayhash'
 
 executable(
   'fast_unique',
   [sources],
-  cpp_args  : ['-march=znver2', '-O3', '-fno-exceptions', '-fno-rtti', '-g'],
-  include_directories : [include_path, hh_path],
+  cpp_args  : ['-march=znver2', '-Ofast', '-fno-exceptions', '-fno-rtti', '-g'],
+  include_directories : [hh_path],
   dependencies : [],
   install : true
 )

@@ -3,7 +3,6 @@
 #include <bitset>
 #include <cstdint>
 #include <cstring>
-#include <emmintrin.h>
 #include <immintrin.h>
 #include <iostream>
 #include <stdlib.h>
@@ -26,18 +25,15 @@ rdtsc()
   return __rdtsc();
 }
 
-const std::array<char, sizeof(__m256i)> newlines = {
-    '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n',
-    '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n'};
-
-std::uint32_t
+__attribute__((pure)) std::uint32_t
 fast_getline(const char *_str)
 {
-  unsigned long long index   = 0;
-  const __m256i all_newlines = _mm256_loadu_si256((__m256i *)newlines.data());
+  unsigned long long index = 0;
+
+  const __m256i all_newlines = _mm256_set1_epi8('\n');
   __m256i hits = _mm256_cmpeq_epi8(_mm256_loadu_si256((__m256i *)(_str + index)), all_newlines);
   std::uint32_t outmask = _mm256_movemask_epi8(hits);
-  while (outmask == 0)
+  while (outmask == 0) [[likely]]
   {
     index += sizeof(__m256i);
     hits    = _mm256_cmpeq_epi8(_mm256_loadu_si256((__m256i *)(_str + index)), all_newlines);
@@ -47,7 +43,7 @@ fast_getline(const char *_str)
 }
 
 // TODO: can be AVX2
-bool
+__attribute__((const)) bool
 strcmp_(const char *__restrict__ a, const char *__restrict__ b, unsigned long long len)
 {
   unsigned long long c = 0;
@@ -82,26 +78,24 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 
   stream.seekg(0, std::ios::end);
   size_t fsize = stream.tellg();
-  std::string buffer(size, ' ');
+  std::string buffer(fsize, ' ');
   stream.seekg(0);
-  stream.read(&buffer[0], size);
+  stream.read(&buffer[0], fsize);
   ipt_buf = buffer;
 
 #endif
+  std::chrono::steady_clock::time_point t1;
+
+  const auto mapsize = (usize)(fsize * 1.2);
 
   highwayhash::HHResult64 result;
 
-  const auto mapsize = (usize)(fsize * 1.5);
+  HH_ALIGNAS(32) const highwayhash::HHKey key = {1, 1, 1, 1};
   std::vector<uptr> hashmap(mapsize);
-
   u64 current_index = 0, next_index = 0;
 
-  auto t1 = high_resolution_clock::now();
+  t1 = high_resolution_clock::now();
 
-  _mm_lfence();
-  _mm_prefetch((char *)hashmap.data(), _MM_HINT_T1);
-
-  HH_ALIGNAS(32) const highwayhash::HHKey key = {1, 2, 3, 4};
   while (current_index < fsize) [[likely]]
   {
     next_index = current_index + fast_getline((const char *)((uptr)ipt_buf.data() + current_index));
@@ -113,10 +107,13 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
     auto hashvalue = result % mapsize;
     while (true) [[unlikely]]
     {
+      _mm_prefetch((char *)&hashmap[hashvalue], _MM_HINT_T1);
+      // biggest bottleneck here cold memory
       if (hashmap[hashvalue] == 0) [[likely]]
       {
-        hashmap[hashvalue] = (uptr)(ipt_buf.data() + current_index);
         ++counter;
+        hashmap[hashvalue] = (uptr)(ipt_buf.data() + current_index);
+        _mm_prefetch((char *)&hashmap[hashvalue], _MM_HINT_NTA);
         break;
       }
       if (strcmp_(ipt_buf.data() + current_index, (const char *)(void *)hashmap[hashvalue],
@@ -129,9 +126,7 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
     current_index = next_index + 1;
   }
 
-  // auto after = rdtsc();
   auto t2 = high_resolution_clock::now();
-
   /* Getting number of milliseconds as a double. */
   duration<double, std::milli> ms_double = t2 - t1;
 
