@@ -30,3 +30,4 @@ executable(
 )
 
 # meson build --wipe -Ddebug=true -Doptimization=3
+# meson build --wipe -Dbuildtype=release -Doptimization=3
