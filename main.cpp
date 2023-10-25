@@ -25,7 +25,7 @@ rdtsc()
   return __rdtsc();
 }
 
-__attribute__((pure)) std::uint32_t
+__attribute__((const)) std::uint32_t
 fast_getline(const char *_str)
 {
   unsigned long long index = 0;
