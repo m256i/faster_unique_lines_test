@@ -9,11 +9,16 @@
 #include <stdlib.h>
 #include <string>
 #include <chrono>
+#include <fstream>
 
 #include <stdint.h>
 #include <highwayhash/highwayhash.h>
 
+#ifdef _WIN32
 #include "file_buffer.h"
+#else
+#include "common.h"
+#endif
 
 uint64_t
 rdtsc()
@@ -41,6 +46,7 @@ fast_getline(const char *_str)
   return __builtin_ctz(outmask) + index;
 }
 
+// TODO: can be AVX2
 bool
 strcmp_(const char *__restrict__ a, const char *__restrict__ b, unsigned long long len)
 {
@@ -60,15 +66,13 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
   using std::chrono::high_resolution_clock;
   using std::chrono::milliseconds;
 
-  usize counter = 0, collision_counter = 0;
+  usize counter = 0;
   std::string ipt_buf;
 
 #ifdef _WIN32
 
   auto fsize = xenon_file::get_fsize(TEXT("D:/git/faster_unique/invalid_tokens.txt"));
-
   ipt_buf.reserve(fsize);
-
   xenon_file::read_file(TEXT("D:/git/faster_unique/invalid_tokens.txt"), ipt_buf);
 
 #else
@@ -77,7 +81,7 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
   auto buf    = std::stringstream();
 
   stream.seekg(0, std::ios::end);
-  size_t size = stream.tellg();
+  size_t fsize = stream.tellg();
   std::string buffer(size, ' ');
   stream.seekg(0);
   stream.read(&buffer[0], size);
@@ -132,5 +136,4 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
   duration<double, std::milli> ms_double = t2 - t1;
 
   std::cout << "unique lines: " << counter << "  " << (ms_double.count() / 1000.f) << "s\n";
-  std::cout << "collisions: " << collision_counter << "\n";
 }
