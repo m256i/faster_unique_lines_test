@@ -119,6 +119,7 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
       if (strcmp_(ipt_buf.data() + current_index, (const char *)(void *)hashmap[hashvalue],
                   next_index - current_index) == true) [[unlikely]]
       {
+        _mm_prefetch((char *)&hashmap[hashvalue], _MM_HINT_NTA);
         break;
       }
       hashvalue = (hashvalue + 1) % mapsize;
