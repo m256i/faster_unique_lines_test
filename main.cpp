@@ -84,7 +84,6 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
   ipt_buf = buffer;
 
 #endif
-  std::chrono::steady_clock::time_point t1;
 
   const auto mapsize = (usize)(fsize * 1.2);
 
@@ -95,10 +94,10 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
   u64 current_index = 0, next_index = 0;
 
 #ifdef _WIN32
-  SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
+  // SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
 #endif
 
-  t1 = high_resolution_clock::now();
+  auto t1 = high_resolution_clock::now();
 
   while (current_index < fsize) [[likely]]
   {
