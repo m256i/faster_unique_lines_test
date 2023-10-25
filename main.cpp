@@ -94,7 +94,7 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
   u64 current_index = 0, next_index = 0;
 
 #ifdef _WIN32
-  // SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
+  SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
 #endif
 
   auto t1 = high_resolution_clock::now();
