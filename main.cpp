@@ -35,23 +35,43 @@ fast_getline(const char *_str)
   return __builtin_ctz(outmask) + index;
 }
 
-// TODO: can be AVX2
+constexpr unsigned int uint_all = ~(unsigned int)0;
+
 __attribute__((const)) inline bool
 strcmp_(const char *__restrict__ a, const char *__restrict__ b, unsigned long long len)
 {
   unsigned long long c = 0;
-  while (a[c] == b[c] && (a[c] != '\n' && b[c] != '\n'))
+  while (c < len)
   {
-    c++;
+    auto adata = _mm256_loadu_si256((__m256i const *)&a[c]);
+    auto bdata = _mm256_loadu_si256((__m256i const *)&b[c]);
+
+    auto newlines = _mm256_set1_epi8('\n');
+
+    unsigned int are_newlines = _mm256_movemask_epi8(_mm256_cmpeq_epi8(bdata, newlines));
+    unsigned int are_equal    = _mm256_movemask_epi8(_mm256_cmpeq_epi8(adata, bdata));
+
+    c += 32;
+    if (are_newlines == 0)
+    {
+      if (are_equal == uint_all) continue;
+      else
+        break;
+    }
+
+    // Index of first newline
+    auto zeroes = __builtin_ctz(are_newlines);
+
+    unsigned int should_set = uint_all >> (32 - zeroes - 1);
+    return (are_equal & should_set) == should_set;
   }
-  return c == len;
+  return false;
 }
 
 __attribute__((const)) inline bool
 test_nonz(__m256i v)
 {
-  __m256i vcmp = _mm256_cmpeq_epi32(v, _mm256_setzero_si256());
-  return _mm256_testz_si256(vcmp, vcmp);
+  return !_mm256_testz_si256(v, v);
 }
 
 __attribute__((const)) usize
@@ -62,7 +82,7 @@ npow2(usize _num)
 }
 
 void
-print256epi32(__m256i _vec)
+print256epi64(__m256i _vec)
 {
   puts("wat");
   alignas(32) u64 arr[4]{};
@@ -101,6 +121,7 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 
   stream.seekg(0, std::ios::end);
   size_t fsize = stream.tellg();
+  std::cout << "fsize " << fsize << std::endl;
   std::string buffer(fsize, ' ');
   stream.seekg(0);
   stream.read(&buffer[0], fsize);
@@ -108,7 +129,7 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 
 #endif
 
-  const auto mapsize = (usize)(npow2(fsize / 45));
+  const auto mapsize = (usize)(npow2(fsize));
 
   HH_ALIGNAS(32) const highwayhash::HHKey key = {1, 1, 1, 1};
   highwayhash::HHStateT<HH_TARGET_AVX2> state(key);
@@ -121,8 +142,10 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 #endif
 
   alignas(32) std::array<u64, 4> hash_indeces;
+  std::array<u64, 4> sizes;
   std::array<uptr, 4> ptr_buf;
-  u64 result_ = 0;
+  u64 result_          = 0;
+  u64 collisioncounter = 0;
 
   auto t1 = high_resolution_clock::now();
 
@@ -130,27 +153,49 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
   {
     for (usize j = 0; j != 4 && (current_index != fsize); ++j)
     {
-      next_index = current_index + fast_getline((const char *)((uptr)ipt_buf.data() + current_index));
+      next_index = current_index + fast_getline((const char *)((uptr)(ipt_buf.data() + current_index)));
       highwayhash::HighwayHashT(&state, ipt_buf.data() + current_index, next_index - current_index, &result_);
-      ptr_buf[j]      = (uptr)ipt_buf.data() + current_index;
+      state.Reset(key);
+
+      // potentially avx too?
+      ptr_buf[j] = (uptr)(ipt_buf.data() + current_index);
+      sizes[j]   = next_index - current_index;
+      // make avx
       hash_indeces[j] = result_ % mapsize;
       current_index   = next_index + 1;
     }
 
-    __m256i hash_index_vector = _mm256_load_si256((__m256i *)&hash_indeces);
-    __m256i map_entries       = _mm256_permute4x64_epi64(_mm256_i64gather_epi64((i64 *)hashmap.data(), hash_index_vector, 8), 0b00011011);
+    __m256i hash_index_vector = _mm256_load_si256((__m256i *)hash_indeces.data());
+    __m256i map_entries = _mm256_i64gather_epi64((long long *)hashmap.data(), hash_index_vector, 8);
 
     while (test_nonz(map_entries)) [[unlikely]] // hashmap[hashvalue] != 0 equivalent
     {
-      const __m256i ones           = _mm256_set1_epi32(1);
-      const __m256i extended_lanes = _mm256_cmpgt_epi32(map_entries, _mm256_set1_epi32(0));
+      __m256i are_nonzero = _mm256_xor_si256(_mm256_cmpeq_epi64(map_entries, _mm256_setzero_si256()), _mm256_set1_epi64x(~u64(0)));
+
+      auto mask = _mm256_movemask_epi8(are_nonzero);
+      for (int i = 0; i < 4; ++i)
+      {
+        if ((mask & (0b1 << (i * 8))) != 0)
+        {
+          if (strcmp_((char *)ptr_buf[i], (char *)map_entries[i], sizes[i]))
+          {
+            are_nonzero[i] = 0;
+            --counter;
+          }
+          else
+          {
+            ++collisioncounter;
+          }
+        }
+      }
 
       /* + 1 % mapsize */
-      hash_index_vector = _mm256_blendv_epi8(hash_index_vector, _mm256_add_epi64(ones, hash_index_vector), _mm256_cmpgt_epi64(map_entries, _mm256_set1_epi32(0)));
+      hash_index_vector = _mm256_blendv_epi8(hash_index_vector, _mm256_add_epi64(_mm256_set1_epi64x(1), hash_index_vector), are_nonzero);
       hash_index_vector = _mm256_and_si256(hash_index_vector, _mm256_set1_epi64x(mapsize - 1));
-      map_entries = _mm256_permute4x64_epi64(_mm256_mask_i64gather_epi64(_mm256_set1_epi32(0), (i64 *)hashmap.data(), hash_index_vector, extended_lanes, sizeof(uptr)), 0b00011011);
-    }
 
+      // if it wasn't 0 then load again, otherwise just 0
+      map_entries = _mm256_mask_i64gather_epi64(_mm256_setzero_si256(), (long long *)hashmap.data(), hash_index_vector, are_nonzero, 8);
+    }
     _mm256_storeu_si256((__m256i *)hash_indeces.data(), hash_index_vector);
 
     for (usize k = 0; k != 4; ++k)
@@ -165,4 +210,5 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
   duration<double, std::milli> ms_double = t2 - t1;
 
   std::cout << "unique lines: " << counter << "  " << (ms_double.count() / 1000.f) << "s\n";
+  std::cout << "collisions " << collisioncounter << "\n";
 }
