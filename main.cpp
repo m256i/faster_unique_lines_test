@@ -147,13 +147,32 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
   alignas(32) std::array<u64, 4> hash_indeces;
   std::array<u64, 4> sizes;
   std::array<uptr, 4> ptr_buf;
-  u64 result_          = 0;
+  u64 result_ = 0;
+  alignas(32) std::array<u64, 4> hash_indeces2;
+  std::array<u64, 4> sizes2;
+  std::array<uptr, 4> ptr_buf2;
   u64 collisioncounter = 0;
 
   auto t1 = high_resolution_clock::now();
 
-  while (current_index != fsize) [[likely]]
+  for (usize j = 0; j != 4 && (current_index != fsize); ++j)
   {
+    next_index = current_index + fast_getline((const char *)((uptr)(ipt_buf.data() + current_index)));
+    highwayhash::HighwayHashT(&state, ipt_buf.data() + current_index, next_index - current_index, &result_);
+    state.Reset(key);
+
+    // potentially avx too?
+    ptr_buf[j] = (uptr)(ipt_buf.data() + current_index);
+    sizes[j]   = next_index - current_index;
+    // make avx
+    hash_indeces[j] = result_ % mapsize;
+    current_index   = next_index + 1;
+  }
+
+  u64 old_current_idx = 0;
+  while (old_current_idx != fsize) [[likely]]
+  {
+    old_current_idx = current_index;
     for (usize j = 0; j != 4 && (current_index != fsize); ++j)
     {
       next_index = current_index + fast_getline((const char *)((uptr)(ipt_buf.data() + current_index)));
@@ -161,11 +180,16 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
       state.Reset(key);
 
       // potentially avx too?
-      ptr_buf[j] = (uptr)(ipt_buf.data() + current_index);
-      sizes[j]   = next_index - current_index;
+      ptr_buf2[j] = (uptr)(ipt_buf.data() + current_index);
+      sizes2[j]   = next_index - current_index;
       // make avx
-      hash_indeces[j] = result_ % mapsize;
-      current_index   = next_index + 1;
+      hash_indeces2[j] = result_ % mapsize;
+      current_index    = next_index + 1;
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+      _mm_prefetch(hashmap.data() + hash_indeces2[i], _MM_HINT_NTA);
     }
 
     __m256i hash_index_vector = _mm256_load_si256((__m256i *)hash_indeces.data());
@@ -175,6 +199,15 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
     {
       __m256i are_nonzero = _mm256_xor_si256(_mm256_cmpeq_epi64(map_entries, _mm256_setzero_si256()), _mm256_set1_epi64x(~u64(0)));
 
+      auto prefetcher = _mm256_blendv_epi8(hash_index_vector, _mm256_add_epi64(_mm256_set1_epi64x(1), hash_index_vector), are_nonzero);
+      prefetcher      = _mm256_and_si256(prefetcher, _mm256_set1_epi64x(mapsize - 1));
+      alignas(32) std::array<u64, 4> prefetch;
+      _mm256_storeu_si256((__m256i *)prefetch.data(), prefetcher);
+      for (const auto e : prefetch)
+      {
+        _mm_prefetch(e, _MM_HINT_NTA);
+      }
+
       auto mask = _mm256_movemask_epi8(are_nonzero);
       for (int i = 0; i < 4; ++i)
       {
@@ -182,12 +215,13 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
         {
           if (strcmp_((char *)ptr_buf[i], (char *)map_entries[i], sizes[i]))
           {
-            are_nonzero[i] = 0;
+            are_nonzero[i]       = 0;
+            // hash_index_vector[i] = 0;
             --counter;
           }
           else
           {
-            ++collisioncounter;
+            // ++collisioncounter;
           }
         }
       }
@@ -199,13 +233,21 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
       // if it wasn't 0 then load again, otherwise just 0
       map_entries = _mm256_mask_i64gather_epi64(_mm256_setzero_si256(), (long long *)hashmap.data(), hash_index_vector, are_nonzero, 8);
     }
+    // Directly write to hash_indeces when we found something
     _mm256_storeu_si256((__m256i *)hash_indeces.data(), hash_index_vector);
 
     for (usize k = 0; k != 4; ++k)
     {
-      ++counter;
-      hashmap[hash_indeces[k]] = ptr_buf[k];
+      // if (hash_indeces[k] != 0)
+      // {
+        ++counter;
+        hashmap[hash_indeces[k]] = ptr_buf[k];
+      // }
     }
+
+    hash_indeces = hash_indeces2;
+    ptr_buf      = ptr_buf2;
+    sizes        = sizes2;
   }
 
   auto t2 = high_resolution_clock::now();
