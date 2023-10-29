@@ -2,9 +2,11 @@
 #include <array>
 #include <bitset>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <immintrin.h>
 #include <iostream>
+#include <span>
 #include <stdlib.h>
 #include <string>
 #include <chrono>
@@ -17,6 +19,7 @@
 #include "file_buffer.h"
 #else
 #include "common.h"
+#include <sys/mman.h>
 #endif
 
 __attribute__((const)) inline std::uint32_t
@@ -98,38 +101,38 @@ print256epi64(__m256i _vec)
 int
 main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 {
-  // NOTE: (IMPORTANT): this version currently lacks collisions lol
-
   using std::chrono::duration;
   using std::chrono::duration_cast;
   using std::chrono::high_resolution_clock;
   using std::chrono::milliseconds;
 
   usize counter = 0;
-  std::string ipt_buf;
 
 #ifdef _WIN32
 
+  std::string ipt_buf;
   auto fsize = xenon_file::get_fsize(argv[1]);
   ipt_buf.reserve(fsize);
   xenon_file::read_file(argv[1], ipt_buf);
 
 #else
+  auto file = fopen(argv[1], "r");
 
-  auto stream = std::ifstream(argv[1], std::ios::binary);
-  auto buf    = std::stringstream();
+  fseek(file, 0L, SEEK_END);
+  u64 fsize = ftell(file);
+  fseek(file, 0L, SEEK_SET);
 
-  stream.seekg(0, std::ios::end);
-  size_t fsize = stream.tellg();
-  std::cout << "fsize " << fsize << std::endl;
-  std::string buffer(fsize, ' ');
-  stream.seekg(0);
-  stream.read(&buffer[0], fsize);
-  ipt_buf = buffer;
+  auto fd = fileno(file);
+  // Who even needs error checking
+  // And an entire page to prevent read overruns
+  auto data    = mmap(NULL, fsize + 0x1000, PROT_READ, MAP_PRIVATE | MAP_POPULATE, fd, 0);
+  auto ipt_buf = std::span<char>((char *)data, fsize);
 
 #endif
 
-  const auto mapsize = (usize)(npow2(fsize));
+  // use fsize for inner loop speed max
+  // this is optimized for full application run speed
+  const auto mapsize = (usize)(npow2(fsize / 20));
 
   HH_ALIGNAS(32) const highwayhash::HHKey key = {1, 1, 1, 1};
   highwayhash::HHStateT<HH_TARGET_AVX2> state(key);
@@ -166,7 +169,7 @@ main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
     }
 
     __m256i hash_index_vector = _mm256_load_si256((__m256i *)hash_indeces.data());
-    __m256i map_entries = _mm256_i64gather_epi64((long long *)hashmap.data(), hash_index_vector, 8);
+    __m256i map_entries       = _mm256_i64gather_epi64((long long *)hashmap.data(), hash_index_vector, 8);
 
     while (test_nonz(map_entries)) [[unlikely]] // hashmap[hashvalue] != 0 equivalent
     {
