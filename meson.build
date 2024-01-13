@@ -16,7 +16,7 @@ cm_lib = sub_proj.dependency('highwayhash')
 executable(
   'fast_unique',
   ['main.cpp'],
-  cpp_args  : ['-march=native', '-mtune=native', '-Ofast', '-fno-exceptions', '-fno-rtti', '-g'],
+  cpp_args : ['-march=native', '-mtune=native', '-Ofast', '-fno-exceptions', '-fno-rtti', '-g'],
   dependencies : [cm_lib],
   install : true
 )
