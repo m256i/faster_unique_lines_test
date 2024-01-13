@@ -8,24 +8,16 @@ project(
         'backend=ninja'
     ]
 )
-sources = run_command('py', 'globber.py', check : true).stdout().strip().split('\n')
- 
-message('source files: ')
-foreach f : sources
-  message('   ' + f)
-endforeach
+cmake = import('cmake')
 
-cmake             = import('cmake')
-
-root_path = meson.global_source_root()
-hh_path = root_path / 'highwayhash'
+sub_proj = cmake.subproject('highwayhash')
+cm_lib = sub_proj.dependency('highwayhash')
 
 executable(
   'fast_unique',
-  [sources],
-  cpp_args  : ['-march=znver2', '-Ofast', '-fno-exceptions', '-fno-rtti', '-g'],
-  include_directories : [hh_path],
-  dependencies : [],
+  ['main.cpp'],
+  cpp_args  : ['-march=native', '-mtune=native', '-Ofast', '-fno-exceptions', '-fno-rtti', '-g', cpp_args],
+  dependencies : [cm_lib],
   install : true
 )
 
