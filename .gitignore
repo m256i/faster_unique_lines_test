@@ -1,2 +1,3 @@
 invalid_tokens.txt
 /.cache/*
+subprojects/*/
