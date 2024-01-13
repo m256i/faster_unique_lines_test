@@ -11,14 +11,14 @@ project(
 
 cmake = import('cmake')
 
-sub_proj = cmake.subproject('highwayhash')
-hh_lib = sub_proj.dependency('highwayhash')
+hh_proj = cmake.subproject('highwayhash')
+hh_dep = hh_proj.dependency('highwayhash')
 
 executable(
   'fast_unique',
   ['main.cpp'],
   cpp_args : ['-march=native', '-mtune=native', '-Ofast', '-fno-exceptions', '-fno-rtti', '-g'],
-  dependencies : [hh_lib],
+  dependencies : [hh_dep],
   install : true
 )
 
