@@ -8,6 +8,7 @@ project(
         'backend=ninja'
     ]
 )
+
 cmake = import('cmake')
 
 sub_proj = cmake.subproject('highwayhash')
